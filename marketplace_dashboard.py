@@ -31,8 +31,8 @@ KEEP_COLS = [
 ]
 
 # ───────────────────── Init DB ─────────────────────
-with engine.begin() as c:
-    c.exec_driver_sql(
+with engine.begin() as conn:
+    conn.exec_driver_sql(
         """CREATE TABLE IF NOT EXISTS sales (
              id INTEGER PRIMARY KEY,
              order_date DATE,
@@ -64,41 +64,36 @@ def fetch_xlsx(url: str) -> bytes:
 def parse_excel(content: bytes, stem: str) -> List[pd.DataFrame]:
     dfs: List[pd.DataFrame] = []
     sheets = pd.read_excel(content, sheet_name=None, engine="openpyxl")
-    for s, df in sheets.items():
+    for sheet_name, df in sheets.items():
         df = df.rename(columns=COL_MAP)
         if not ESSENTIAL.issubset(df.columns):
             continue
-        df["sheet"], df["marketplace"] = s, stem
+        df["sheet"], df["marketplace"] = sheet_name, stem
         dfs.append(df)
     return dfs
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalizza tipi e restituisce solo le colonne previste dal DB."""
     df = df.copy()
-    # --- date → order_date -------------------------------------------------
+    # date → order_date
     df["order_date"] = pd.to_datetime(df.get("date"), errors="coerce")
     if "date" in df.columns:
         df.drop(columns=["date"], inplace=True)
-    # --- cast stringhe ------------------------------------------------------
+    # cast stringhe
     for col in ("sku", "product_name", "marketplace", "sheet"):
         if col in df.columns:
             df[col] = df[col].astype(str)
-    # --- quantità -----------------------------------------------------------
+    # quantità
     if "quantity" in df.columns:
-        df["quantity"] = (
-            pd.to_numeric(df["quantity"], errors="coerce")
-            .fillna(1)
-            .astype(int)
-        )
+        df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(1).astype(int)
     else:
         df["quantity"] = 1
-    # --- valori monetari ----------------------------------------------------
+    # valori monetari
     for col in ("sale", "purchase_cost", "commission"):
         df[col] = pd.to_numeric(df.get(col, 0), errors="coerce").fillna(0.0)
-    # --- garantisci tutte le colonne richieste -----------------------------
+    # garantisci tutte le colonne richieste
     for col in KEEP_COLS:
         if col not in df.columns:
-            default = 0 if col in {"quantity", "sale", "purchase_cost", "commission"} else None
+            default = 0 if col in {"quantity","sale","purchase_cost","commission"} else None
             df[col] = default
     return df[KEEP_COLS]
 
@@ -106,26 +101,38 @@ def import_to_db(dfs: List[pd.DataFrame]) -> int:
     if not dfs:
         return 0
     big = clean(pd.concat(dfs, ignore_index=True))
-    big.drop_duplicates(subset=["order_date", "marketplace", "sheet", "sku"], inplace=True)
-    with engine.begin() as c:
+    big.drop_duplicates(subset=["order_date","marketplace","sheet","sku"], inplace=True)
+
+    with engine.begin() as conn:
         existing = pd.read_sql(
             "SELECT order_date, marketplace, sheet, sku FROM sales",
-            c,
+            conn,
             parse_dates=["order_date"],
         )
+
     if not existing.empty:
-        merged = big.merge(existing, on=["order_date","marketplace","sheet","sku"], how="left", indicator=True)
+        merged = big.merge(existing, on=["order_date","marketplace","sheet","sku"],
+                           how="left", indicator=True)
         big = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
+
     if big.empty:
         return 0
-    with engine.begin() as c:
-        big.to_sql("sales", c, if_exists="append", index=False, method="multi")
+
+    with engine.begin() as conn:
+        big.to_sql("sales", conn, if_exists="append", index=False, method="multi")
+
     return len(big)
 
 def drive_to_dfs() -> List[pd.DataFrame]:
     dfs: List[pd.DataFrame] = []
     with tempfile.TemporaryDirectory() as td:
-        files = gdown.download_folder(REMOTE_FOLDER, quiet=True, remaining_ok=True, output=td, use_cookies=False)
+        files = gdown.download_folder(
+            REMOTE_FOLDER,
+            quiet=True,
+            remaining_ok=True,
+            output=td,
+            use_cookies=False
+        )
         for p in files:
             if not str(p).endswith(".xlsx"):
                 continue
@@ -141,104 +148,99 @@ def drive_to_dfs() -> List[pd.DataFrame]:
 def main():
     st.title("📊 Marketplace Dashboard — DB SQLite")
 
-    # ────── Sidebar: Aggiorna + Filtri + Quick Range ──────
+    # ────── Sidebar: Aggiorna DB ──────
     with st.sidebar:
-        col_upd, col_filt = st.columns([1, 1])
-        with col_upd:
-            st.header("Aggiorna DB")
-            mode = st.selectbox("Sorgente", ["File manuali", "Cartella Drive"])
-            run = st.button("Aggiorna DB ora", use_container_width=True)
-        with col_filt:
-            st.header("Filtri")
-            # placeholder per df, verrà ridefinito dopo
-            markets = []
-            sel = []
-            dmin, dmax = None, None
-            sd, ed = None, None
-            # sovrascritti in seguito
-        st.markdown("---")
-        st.markdown("**Dati da analizzare**")
-        r1 = st.columns(3)
-        r2 = st.columns(2)
-        import datetime as _dt
-        today = _dt.date.today()
-        # placeholder sd/ed logica, ridefinita subito dopo df
-        if r1[0].button("Ultimi 30 giorni", use_container_width=True):
-            sd, ed = today - _dt.timedelta(days=30), today
-        if r1[1].button("Oggi", use_container_width=True):
-            sd = ed = today
-        if r1[2].button("Ieri", use_container_width=True):
-            yesterday = today - _dt.timedelta(days=1)
-            sd = ed = yesterday
-        if r2[0].button("Settimana", use_container_width=True):
-            sd = today - _dt.timedelta(days=today.weekday())
-            ed = sd + _dt.timedelta(days=6)
-        if r2[1].button("Mese in corso", use_container_width=True):
-            sd = today.replace(day=1)
-            nm = sd.replace(day=28) + _dt.timedelta(days=4)
-            ed = nm - _dt.timedelta(days=nm.day)
-        # ────────────────────────────────────────────────────────
+        st.header("Aggiorna DB")
+        mode = st.selectbox("Sorgente", ["File manuali", "Cartella Drive"])
+        run = st.button("Aggiorna DB ora")
 
-    # Esegui l'aggiornamento DB, se richiesto
     if run:
         if mode == "File manuali":
-            upl = st.file_uploader("Trascina uno o più .xlsx", type="xlsx", accept_multiple_files=True)
+            upl = st.file_uploader(
+                "Trascina uno o più .xlsx",
+                type="xlsx",
+                accept_multiple_files=True
+            )
             if not upl:
                 st.error("Carica almeno un file.")
                 st.stop()
-            dfs = [df for uf in upl for df in parse_excel(uf.read(), uf.name.split(".")[0])]
+            dfs = [
+                df
+                for uf in upl
+                for df in parse_excel(uf.read(), uf.name.split(".")[0])
+            ]
             st.success(f"Righe nuove: {import_to_db(dfs)}")
         else:
             st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
 
-    # Leggi i dati dal DB
+    # ────── Carica dati dal DB ──────
     df = pd.read_sql("SELECT * FROM sales", engine, parse_dates=["order_date"])
     if df.empty:
         st.info("DB vuoto: importa dei file.")
         st.stop()
 
-    # Ora popola i filtri correttamente dentro la sidebar
+    # ────── Sidebar: Filtri & Quick Range ──────
     with st.sidebar:
-        # Ricalcola marketplace, date e range
+        st.header("Filtri")
         markets = sorted(df["marketplace"].unique())
         sel = st.multiselect("Marketplace", markets, default=markets)
+
         dmin, dmax = df["order_date"].min(), df["order_date"].max()
-        sd_in, ed_in = st.date_input(
+        sd, ed = st.date_input(
             "Intervallo",
-            (dmin.date(), dmax.date()),
+            value=(dmin.date(), dmax.date()),
             min_value=dmin.date(),
             max_value=dmax.date(),
-            key="date_range",
-            use_container_width=True
+            key="date_range"
         )
-        # Se l'utente non ha premuto nessun quick button, usa l'intervallo manuale
-        if sd is None or ed is None:
-            sd, ed = sd_in, ed_in
-        # clamp sui min/max
+
+        st.markdown("---")
+        st.subheader("Dati da analizzare")
+        c1, c2, c3 = st.columns(3)
+        c4, c5     = st.columns(2)
+
+        import datetime as _dt
+        today = _dt.date.today()
+
+        if c1.button("Ultimi 30 giorni"):
+            sd, ed = today - _dt.timedelta(days=30), today
+        if c2.button("Oggi"):
+            sd = ed = today
+        if c3.button("Ieri"):
+            y = today - _dt.timedelta(days=1)
+            sd = ed = y
+        if c4.button("Settimana"):
+            sd = today - _dt.timedelta(days=today.weekday())
+            ed = sd + _dt.timedelta(days=6)
+        if c5.button("Mese in corso"):
+            sd = today.replace(day=1)
+            nm = sd.replace(day=28) + _dt.timedelta(days=4)
+            ed = nm - _dt.timedelta(days=nm.day)
+
         sd = max(sd, dmin.date())
         ed = min(ed, dmax.date())
 
-    # Applica i filtri
+    # ────── Applica filtri ──────
     filt = df[
-        df["marketplace"].isin(sel)
-        & df["order_date"].between(pd.Timestamp(sd), pd.Timestamp(ed))
+        df["marketplace"].isin(sel) &
+        df["order_date"].between(pd.Timestamp(sd), pd.Timestamp(ed))
     ]
     if filt.empty:
         st.warning("Nessun record.")
         st.stop()
 
-    # ─────────── KPI ───────────
+    # ────── KPI ──────
     sales  = filt["sale"].sum()
     costs  = filt["purchase_cost"].sum()
     comm   = filt["commission"].sum()
     margin = sales - (costs + comm)
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Fatturato", f"€ {sales:,.2f}")
-    k2.metric("Acquisto", f"€ {costs:,.2f}")
-    k3.metric("Commissione Market", f"€ {comm:,.2f}")
-    k4.metric("Margine Lordo", f"€ {margin:,.2f}")
+    k1.metric("Fatturato",           f"€ {sales:,.2f}")
+    k2.metric("Acquisto",            f"€ {costs:,.2f}")
+    k3.metric("Commissione Market",  f"€ {comm:,.2f}")
+    k4.metric("Margine Lordo",       f"€ {margin:,.2f}")
 
-    # Trend giornaliero
+    # ────── Trend giornaliero ──────
     st.subheader("Trend giornaliero")
     trend = (
         filt
@@ -248,15 +250,15 @@ def main():
     )
     st.line_chart(trend)
 
-    # Riepilogo per marketplace
+    # ────── Riepilogo per marketplace ──────
     st.subheader("Riepilogo marketplace")
     summary = (
         filt
         .groupby("marketplace")
         .agg(
-            vendite=("sale","sum"),
-            acquisto=("purchase_cost","sum"),
-            commissione_market=("commission","sum"),
+            vendite             = ("sale","sum"),
+            acquisto            = ("purchase_cost","sum"),
+            commissione_market  = ("commission","sum"),
         )
     )
     summary["margine_lordo"] = summary["vendite"] - (
@@ -268,20 +270,20 @@ def main():
         summary[col] = summary[col].apply(fmt_eur)
     st.dataframe(summary, use_container_width=True)
 
-    # Prodotti più venduti
+    # ────── Prodotti più venduti ──────
     st.subheader("Prodotti più venduti")
-    mp = st.radio("Marketplace", ["Tutti i marketplace"] + markets, horizontal=True)
-    dt = filt if mp == "Tutti i marketplace" else filt[filt["marketplace"] == mp]
+    mp    = st.radio("Marketplace", ["Tutti i marketplace"] + markets, horizontal=True)
+    dt    = filt if mp == "Tutti i marketplace" else filt[filt["marketplace"] == mp]
     top_n = st.slider("Top N", 5, 50, 10)
-    grp = ["sku"] + (["product_name"] if "product_name" in dt.columns else [])
+    grp   = ["sku"] + (["product_name"] if "product_name" in dt.columns else [])
     data_top = (
         dt
         .groupby(grp)
         .agg(
-            qta=("quantity","sum"),
-            vendite=("sale","sum"),
-            acquisto=("purchase_cost","sum"),
-            commissione_market=("commission","sum")
+            qta                 = ("quantity","sum"),
+            vendite             = ("sale","sum"),
+            acquisto            = ("purchase_cost","sum"),
+            commissione_market  = ("commission","sum"),
         )
         .reset_index()
         .sort_values("qta", ascending=False)
@@ -296,13 +298,18 @@ def main():
     data_top.index += 1
     st.dataframe(data_top, use_container_width=True)
 
-    # Export CSV
+    # ────── Export CSV ──────
     st.download_button(
         "Scarica CSV filtrato",
         filt.to_csv(index=False).encode("utf-8"),
         "dati_filtrati.csv",
         "text/csv"
     )
+
+
+if __name__ == "__main__":
+    main()
+
 
 if __name__ == "__main__":
     main()
