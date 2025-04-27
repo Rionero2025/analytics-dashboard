@@ -393,28 +393,44 @@ def main():
     # ─── LINEA DI DEMARCAZIONE ─────────────────────────────────────
     st.markdown("---")
 
-    # ─── TOP 10 PRODOTTI VENDUTI (API) ──────────────────────────────
-    st.subheader("Top 10 Prodotti Venduti nel Periodo")
-    exploded = (
-        orders_df
-        .assign(product_name=orders_df["product_name"].str.split("; "))
-        .explode("product_name")
+  # ── Top 10 Prodotti API ─────────────────────────────────────
+st.markdown("---")
+st.subheader("Top 10 Prodotti Venduti nel Periodo (API)")
+
+# esplodo eventuali stringhe "product_name" in liste
+exploded = (
+    orders_df
+    .assign(product_name=orders_df["product_name"].str.split("; "))
+    .explode("product_name")
+)
+
+# raggruppo per SKU + nome prodotto
+# ORDINI  = numero di ordini distinti in cui compare quel prodotto
+# VENDITE = somma dei sale_price (meglio se in futuro estrai line_price)
+# COMMISSIONI = somma delle commissioni
+top10 = (
+    exploded
+    .groupby(["sku", "product_name"], dropna=False)
+    .agg(
+        Ordini     = ("order_id",     "nunique"),   # <-- nunique per contare ordini diversi
+        Vendite    = ("sale_price",   "sum"),
+        Commissioni= ("commission",   "sum"),
     )
-    top10 = (
-        exploded
-        .groupby("product_name")
-        .agg(
-            ordini     = ("order_id",   "count"),
-            vendite    = ("sale_price", "sum"),
-            commissioni= ("commission", "sum")
-        )
-        .sort_values("ordini", ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    top10["vendite"]     = top10["vendite"].apply(format_euro)
-    top10["commissioni"] = top10["commissioni"].apply(format_euro)
-    st.dataframe(top10, use_container_width=True)
+    .reset_index()
+    .sort_values("Ordini", ascending=False)
+    .head(10)
+)
+
+# formatto i numeri in €
+top10["Vendite"]     = top10["Vendite"].apply(format_euro)
+top10["Commissioni"] = top10["Commissioni"].apply(format_euro)
+
+# mostro la tabella
+st.dataframe(top10.rename(columns={
+    "sku": "SKU/EAN",
+    "product_name": "Nome Prodotto"
+}), use_container_width=True)
+
 
 if __name__ == "__main__":
     main()
