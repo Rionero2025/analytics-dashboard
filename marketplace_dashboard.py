@@ -95,8 +95,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = pd.to_datetime(df.get("date"), errors="coerce")
     df.drop(columns=["date"], errors="ignore", inplace=True)
     for c in ("sku","product_name","marketplace","sheet"):
-        if c in df:
-            df[c] = df[c].astype(str)
+        if c in df: df[c] = df[c].astype(str)
     df["quantity"] = pd.to_numeric(df.get("quantity",1), errors="coerce").fillna(1).astype(int)
     for c in ("sale","purchase_cost","commission"):
         df[c] = pd.to_numeric(df.get(c,0), errors="coerce").fillna(0.0)
@@ -173,21 +172,11 @@ def main():
                 st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
 
         st.markdown("---")
-        # ─── Gestione DB vuoto per range date ───────────────────────────
         bounds = pd.read_sql(
-            "SELECT MIN(order_date) AS dmin, MAX(order_date) AS dmax FROM sales",
+            "SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales",
             engine, parse_dates=["dmin","dmax"]
         ).iloc[0]
-        raw_min, raw_max = bounds["dmin"], bounds["dmax"]
-        if pd.isna(raw_min):
-            dmin = date.today()
-        else:
-            dmin = raw_min.date()
-        if pd.isna(raw_max):
-            dmax = date.today()
-        else:
-            dmax = raw_max.date()
-
+        dmin, dmax = bounds["dmin"].date(), bounds["dmax"].date()
         markets = sorted(
             pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
         )
@@ -207,8 +196,8 @@ def main():
 
         st.markdown("---")
         st.subheader("Dati da analizzare rapidi")
-        a1, a2, a3 = st.columns(3)
-        b1, b2, b3 = st.columns(3)
+        a1,a2,a3 = st.columns(3)
+        b1,b2,b3 = st.columns(3)
         today = date.today()
         if a1.button("30giorni"):
             sd, ed = today - timedelta(days=30), today
@@ -227,7 +216,7 @@ def main():
             sd = today.replace(month=1, day=1)
             ed = today
 
-    # ─── Excel: titoli e filtri ────────────────────────────────────
+    # ─── Excel: titoli e filtri ─────────────────────────────────────
     st.markdown(f"**Periodo Selezionato: {sd} – {ed}**\n")
 
     df = pd.read_sql("SELECT * FROM sales", engine, parse_dates=["order_date"])
@@ -244,20 +233,20 @@ def main():
         st.warning("Nessun record")
         return
 
-    # ─── KPI Excel ─────────────────────────────────────────
+    # ─── KPI Excel ──────────────────────────────────────────────────
     n_ordini   = len(filt)
     sales_sum  = filt["sale"].sum()
     cost_sum   = filt["purchase_cost"].sum()
     comm_sum   = filt["commission"].sum()
     margin_l   = sales_sum - (cost_sum + comm_sum)
-    c0, c1, c2, c3, c4 = st.columns(5)
+    c0,c1,c2,c3,c4 = st.columns(5)
     c0.metric("Ordini Excel",   n_ordini)
-    c1.metric("Fatturato",      format_euro(sales_sum))
-    c2.metric("Acquisto",       format_euro(cost_sum))
-    c3.metric("Commissione",    format_euro(comm_sum))
-    c4.metric("Margine Lordo",  format_euro(margin_l))
+    c1.metric("Fatturato",     format_euro(sales_sum))
+    c2.metric("Acquisto",      format_euro(cost_sum))
+    c3.metric("Commissione",   format_euro(comm_sum))
+    c4.metric("Margine Lordo", format_euro(margin_l))
 
-    # ─── Trend giornaliero ─────────────────────────────────────
+    # ─── Trend giornaliero ─────────────────────────────────────────
     st.subheader("Trend giornaliero")
     trend = (
         filt.groupby([filt["order_date"].dt.date, "marketplace"])
@@ -281,7 +270,7 @@ def main():
         summary[col] = summary[col].apply(format_euro)
     st.dataframe(summary, use_container_width=True)
 
-    # ─── Prodotti più venduti ────────────────────────────────────
+    # ─── Prodotti più venduti ─────────────────────────────────────
     st.subheader("Prodotti più venduti")
     sel_mp = st.radio(
         "Marketplace",
@@ -306,6 +295,7 @@ def main():
     top["margine_lordo"] = top["vendite"] - (top["acquisto"] + top["commissione"])
     for col in ["vendite","acquisto","commissione","margine_lordo"]:
         top[col] = top[col].apply(format_euro)
+    top.index += 1
     st.dataframe(top, use_container_width=True)
 
     st.download_button(
@@ -361,7 +351,7 @@ def main():
     total_comm   = orders_df["commission"].sum()
     total_margin = total_sales - total_taxes - total_comm
 
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1,k2,k3,k4,k5 = st.columns(5)
     k1.metric("Ordini",      orders_df["order_id"].nunique())
     k2.metric("Vendite",     format_euro(total_sales))
     k3.metric("Tasse",       format_euro(total_taxes))
