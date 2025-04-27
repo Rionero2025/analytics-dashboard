@@ -393,11 +393,11 @@ def main():
     # ─── LINEA DI DEMARCAZIONE ─────────────────────────────────────
     st.markdown("---")
 
-  # ── Top 10 Prodotti API ─────────────────────────────────────
+# ─────────────── Top 10 Prodotti API ─────────────────────────────
 st.markdown("---")
 st.subheader("Top 10 Prodotti Venduti nel Periodo (API)")
 
-# esplodo eventuali stringhe "product_name" in liste
+# esplodo product_name multipli (se li hai) 
 exploded = (
     orders_df
     .assign(product_name=orders_df["product_name"].str.split("; "))
@@ -405,31 +405,30 @@ exploded = (
 )
 
 # raggruppo per SKU + nome prodotto
-# ORDINI  = numero di ordini distinti in cui compare quel prodotto
-# VENDITE = somma dei sale_price (meglio se in futuro estrai line_price)
-# COMMISSIONI = somma delle commissioni
 top10 = (
     exploded
     .groupby(["sku", "product_name"], dropna=False)
     .agg(
-        Ordini     = ("order_id",     "nunique"),   # <-- nunique per contare ordini diversi
-        Vendite    = ("sale_price",   "sum"),
-        Commissioni= ("commission",   "sum"),
+        Ordini      = ("order_id",   "nunique"),
+        Vendite     = ("sale_price", "sum"),
+        Commissioni = ("commission", "sum")
     )
     .reset_index()
     .sort_values("Ordini", ascending=False)
     .head(10)
 )
 
-# formatto i numeri in €
+# formatto le colonne €
 top10["Vendite"]     = top10["Vendite"].apply(format_euro)
 top10["Commissioni"] = top10["Commissioni"].apply(format_euro)
 
-# mostro la tabella
-st.dataframe(top10.rename(columns={
+# rinomino la colonna sku e product_name per mostrarle in tabella
+top10 = top10.rename(columns={
     "sku": "SKU/EAN",
     "product_name": "Nome Prodotto"
-}), use_container_width=True)
+})
+
+st.dataframe(top10, use_container_width=True)
 
 
 if __name__ == "__main__":
