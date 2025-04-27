@@ -95,7 +95,8 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = pd.to_datetime(df.get("date"), errors="coerce")
     df.drop(columns=["date"], errors="ignore", inplace=True)
     for c in ("sku","product_name","marketplace","sheet"):
-        if c in df: df[c] = df[c].astype(str)
+        if c in df:
+            df[c] = df[c].astype(str)
     df["quantity"] = pd.to_numeric(df.get("quantity",1), errors="coerce").fillna(1).astype(int)
     for c in ("sale","purchase_cost","commission"):
         df[c] = pd.to_numeric(df.get(c,0), errors="coerce").fillna(0.0)
@@ -172,11 +173,21 @@ def main():
                 st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
 
         st.markdown("---")
+        # ─── Gestione DB vuoto per range date ───────────────────────────
         bounds = pd.read_sql(
-            "SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales",
+            "SELECT MIN(order_date) AS dmin, MAX(order_date) AS dmax FROM sales",
             engine, parse_dates=["dmin","dmax"]
         ).iloc[0]
-        dmin, dmax = bounds["dmin"].date(), bounds["dmax"].date()
+        raw_min, raw_max = bounds["dmin"], bounds["dmax"]
+        if pd.isna(raw_min):
+            dmin = date.today()
+        else:
+            dmin = raw_min.date()
+        if pd.isna(raw_max):
+            dmax = date.today()
+        else:
+            dmax = raw_max.date()
+
         markets = sorted(
             pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
         )
@@ -196,8 +207,8 @@ def main():
 
         st.markdown("---")
         st.subheader("Dati da analizzare rapidi")
-        a1,a2,a3 = st.columns(3)
-        b1,b2,b3 = st.columns(3)
+        a1, a2, a3 = st.columns(3)
+        b1, b2, b3 = st.columns(3)
         today = date.today()
         if a1.button("30giorni"):
             sd, ed = today - timedelta(days=30), today
@@ -239,7 +250,7 @@ def main():
     cost_sum   = filt["purchase_cost"].sum()
     comm_sum   = filt["commission"].sum()
     margin_l   = sales_sum - (cost_sum + comm_sum)
-    c0,c1,c2,c3,c4 = st.columns(5)
+    c0, c1, c2, c3, c4 = st.columns(5)
     c0.metric("Ordini Excel",   n_ordini)
     c1.metric("Fatturato",      format_euro(sales_sum))
     c2.metric("Acquisto",       format_euro(cost_sum))
@@ -350,7 +361,7 @@ def main():
     total_comm   = orders_df["commission"].sum()
     total_margin = total_sales - total_taxes - total_comm
 
-    k1,k2,k3,k4,k5 = st.columns(5)
+    k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Ordini",      orders_df["order_id"].nunique())
     k2.metric("Vendite",     format_euro(total_sales))
     k3.metric("Tasse",       format_euro(total_taxes))
