@@ -170,10 +170,7 @@ def main():
                 if not upl:
                     st.error("Carica almeno un file.")
                     st.stop()
-                dfs = [
-                    df for uf in upl
-                    for df in parse_excel(uf.read(), uf.name.split(".")[0])
-                ]
+                dfs = [df for uf in upl for df in parse_excel(uf.read(), uf.name.split(".")[0])]
                 st.success(f"Righe nuove: {import_to_db(dfs)}")
             else:
                 st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
@@ -267,7 +264,7 @@ def main():
     st.subheader("Trend giornaliero")
     trend = (
         filt.groupby([filt["order_date"].dt.date, "marketplace"])
-            .agg(vendite=("sale","sum"))
+            .agg(vendite=("sale", "sum"))
             .unstack(fill_value=0)["vendite"]
     )
     st.line_chart(trend)
@@ -279,7 +276,9 @@ def main():
         acquisto=("purchase_cost","sum"),
         commissione=("commission","sum")
     )
-    summary["margine_lordo"] = (summary["vendite"] - (summary["acquisto"] + summary["commissione"]))
+    summary["margine_lordo"] = (
+        summary["vendite"] - (summary["acquisto"] + summary["commissione"])
+    )
     summary = summary.reset_index()
     for col in ["vendite","acquisto","commissione","margine_lordo"]:
         summary[col] = summary[col].apply(format_euro)
@@ -287,14 +286,22 @@ def main():
 
     # ─── Prodotti più venduti ────────────────────────────────────
     st.subheader("Prodotti più venduti")
-    sel_mp = st.radio("Marketplace", ["Tutti"] + markets, horizontal=True)
+    sel_mp = st.radio(
+        "Marketplace",
+        ["Tutti"] + markets,
+        horizontal=True
+    )
     df_top = filt if sel_mp == "Tutti" else filt[filt["marketplace"] == sel_mp]
     top_n = st.slider("Top N", 5, 50, 10)
     grp = ["sku"] + (["product_name"] if "product_name" in df_top else [])
     top = (
         df_top.groupby(grp)
-              .agg(qta=("quantity","sum"), vendite=("sale","sum"),
-                   acquisto=("purchase_cost","sum"), commissione=("commission","sum"))
+              .agg(
+                  qta=("quantity","sum"),
+                  vendite=("sale","sum"),
+                  acquisto=("purchase_cost","sum"),
+                  commissione=("commission","sum")
+              )
               .reset_index()
               .sort_values("qta", ascending=False)
               .head(top_n)
@@ -316,8 +323,8 @@ def main():
     st.subheader("Vendite Estratte da Worten")
     api_quick = st.radio(
         "Filtra ordini per",
-        ["Oggi","Ieri","Ultimi 30 giorni","Questa Settimana",
-         "Mese Corrente","Questo Anno","Personalizzato"],
+        ["Oggi", "Ieri", "Ultimi 30 giorni", "Questa Settimana",
+         "Mese Corrente", "Questo Anno", "Personalizzato"],
         horizontal=True
     )
     today = date.today()
@@ -335,13 +342,13 @@ def main():
         nm = api_sd.replace(day=28) + timedelta(days=4)
         api_ed = nm - timedelta(days=nm.day)
     elif api_quick == "Questo Anno":
-        api_sd = date(today.year,1,1)
+        api_sd = date(today.year, 1, 1)
         api_ed = today
     else:
         api_sd, api_ed = st.date_input(
             "Seleziona intervallo personalizzato",
             value=(today - timedelta(days=7), today),
-            min_value=date(today.year-1,1,1),
+            min_value=date(today.year - 1, 1, 1),
             max_value=today,
             key="api_custom_range"
         )
@@ -349,11 +356,8 @@ def main():
     st.markdown(f"**Intervallo API:** {api_sd} – {api_ed}")
 
     orders_df = get_orders_worten(api_sd, api_ed)
-
-    # ─── Garantiamo sempre la colonna `order_status` ───────────────
     if "order_status" not in orders_df.columns:
         orders_df["order_status"] = ""
-
     for col in ["sale_price","taxes","commission","shipping"]:
         orders_df[col] = pd.to_numeric(orders_df.get(col,0), errors="coerce").fillna(0)
     total_sales  = orders_df["sale_price"].sum()
@@ -383,8 +387,9 @@ def main():
         df_orders.style
                  .format({"sale_price": format_euro, "commission": format_euro})
                  .applymap(
-                     lambda v: "color: red" if str(v).lower()
-                     in ("annullato","cancellato","rimborsato") else "",
+                     lambda v: "color: red"
+                     if str(v).lower() in ("annullato","cancellato","rimborsato")
+                     else "",
                      subset=["Stato Ordine"]
                  )
     )
@@ -393,43 +398,19 @@ def main():
     # ─── LINEA DI DEMARCAZIONE ─────────────────────────────────────
     st.markdown("---")
 
-# ─────────────── Top 10 Prodotti API ─────────────────────────────
-st.markdown("---")
-st.subheader("Top 10 Prodotti Venduti nel Periodo (API)")
-
-# esplodo product_name multipli (se li hai) 
-exploded = (
-    orders_df
-    .assign(product_name=orders_df["product_name"].str.split("; "))
-    .explode("product_name")
-)
-
-# raggruppo per SKU + nome prodotto
-top10 = (
-    exploded
-    .groupby(["sku", "product_name"], dropna=False)
-    .agg(
-        Ordini      = ("order_id",   "nunique"),
-        Vendite     = ("sale_price", "sum"),
-        Commissioni = ("commission", "sum")
+    # ─── TOP 10 PRODOTTI VENDUTI (API) ──────────────────────────────
+    st.subheader("Top 10 Prodotti Venduti nel Periodo")
+    top10 = (
+        orders_df
+        .groupby("product_name")
+        .agg(ordini=("order_id","nunique"), vendite=("sale_price","sum"), commissioni=("commission","sum"))
+        .sort_values("ordini", ascending=False)
+        .head(10)
+        .reset_index()
     )
-    .reset_index()
-    .sort_values("Ordini", ascending=False)
-    .head(10)
-)
-
-# formatto le colonne €
-top10["Vendite"]     = top10["Vendite"].apply(format_euro)
-top10["Commissioni"] = top10["Commissioni"].apply(format_euro)
-
-# rinomino la colonna sku e product_name per mostrarle in tabella
-top10 = top10.rename(columns={
-    "sku": "SKU/EAN",
-    "product_name": "Nome Prodotto"
-})
-
-st.dataframe(top10, use_container_width=True)
-
+    top10["vendite"]     = top10["vendite"].apply(format_euro)
+    top10["commissioni"] = top10["commissioni"].apply(format_euro)
+    st.dataframe(top10, use_container_width=True)
 
 if __name__ == "__main__":
     main()
