@@ -172,27 +172,42 @@ def main():
                 st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
 
         st.markdown("---")
-        bounds = pd.read_sql(
-            "SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales",
-            engine, parse_dates=["dmin","dmax"]
-        ).iloc[0]
-        dmin, dmax = bounds["dmin"].date(), bounds["dmax"].date()
-        markets = sorted(
-            pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
-        )
-        sel = st.multiselect("Marketplace", markets, default=markets)
+     # ───────────────── Sidebar: range date ─────────────────────────────────────
+bounds = pd.read_sql(
+    "SELECT MIN(order_date) AS dmin, MAX(order_date) AS dmax FROM sales",
+    engine, parse_dates=["dmin","dmax"]
+).iloc[0]
 
-        dates = st.date_input(
-            "Intervallo",
-            (dmin, dmax),
-            min_value=dmin,
-            max_value=date.today(),
-            key="date_range"
-        )
-        if isinstance(dates, tuple) and len(dates) == 2:
-            sd, ed = dates
-        else:
-            sd = ed = dates
+raw_min, raw_max = bounds["dmin"], bounds["dmax"]
+
+# Se il DB è vuoto (NaT), usiamo oggi come default
+if pd.isna(raw_min):
+    dmin = date.today()
+else:
+    dmin = raw_min.date()
+
+if pd.isna(raw_max):
+    dmax = date.today()
+else:
+    dmax = raw_max.date()
+
+markets = sorted(
+    pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
+)
+sel = st.multiselect("Marketplace", markets, default=markets)
+
+dates = st.date_input(
+    "Intervallo",
+    (dmin, dmax),
+    min_value=dmin,
+    max_value=date.today(),
+    key="date_range"
+)
+if isinstance(dates, tuple) and len(dates) == 2:
+    sd, ed = dates
+else:
+    sd = ed = dates
+
 
         st.markdown("---")
         st.subheader("Dati da analizzare rapidi")
