@@ -95,10 +95,18 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = pd.to_datetime(df.get("date"), errors="coerce")
     df.drop(columns=["date"], errors="ignore", inplace=True)
     for c in ("sku","product_name","marketplace","sheet"):
-        if c in df: df[c] = df[c].astype(str)
-    df["quantity"] = pd.to_numeric(df.get("quantity",1), errors="coerce").fillna(1).astype(int)
+        if c in df:
+            df[c] = df[c].astype(str)
+    # Assicuriamoci che 'quantity' sia sempre una Series
+    if "quantity" not in df:
+        df["quantity"] = 1
+    df["quantity"] = (
+        pd.to_numeric(df["quantity"], errors="coerce")
+          .fillna(1)
+          .astype(int)
+    )
     for c in ("sale","purchase_cost","commission"):
-        df[c] = pd.to_numeric(df.get(c,0), errors="coerce").fillna(0.0)
+        df[c] = pd.to_numeric(df.get(c, 0), errors="coerce").fillna(0.0)
     for c in KEEP_COLS:
         if c not in df:
             df[c] = 0 if c in {"quantity","sale","purchase_cost","commission"} else None
@@ -163,8 +171,7 @@ def main():
                     st.error("Carica almeno un file.")
                     st.stop()
                 dfs = [
-                    df
-                    for uf in upl
+                    df for uf in upl
                     for df in parse_excel(uf.read(), uf.name.split(".")[0])
                 ]
                 st.success(f"Righe nuove: {import_to_db(dfs)}")
@@ -172,11 +179,21 @@ def main():
                 st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
 
         st.markdown("---")
+        # ─── Gestione DB vuoto per range date ───────────────────────────
         bounds = pd.read_sql(
-            "SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales",
+            "SELECT MIN(order_date) AS dmin, MAX(order_date) AS dmax FROM sales",
             engine, parse_dates=["dmin","dmax"]
         ).iloc[0]
-        dmin, dmax = bounds["dmin"].date(), bounds["dmax"].date()
+        raw_min, raw_max = bounds["dmin"], bounds["dmax"]
+        if pd.isna(raw_min):
+            dmin = date.today()
+        else:
+            dmin = raw_min.date()
+        if pd.isna(raw_max):
+            dmax = date.today()
+        else:
+            dmax = raw_max.date()
+
         markets = sorted(
             pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
         )
@@ -196,8 +213,8 @@ def main():
 
         st.markdown("---")
         st.subheader("Dati da analizzare rapidi")
-        a1,a2,a3 = st.columns(3)
-        b1,b2,b3 = st.columns(3)
+        a1, a2, a3 = st.columns(3)
+        b1, b2, b3 = st.columns(3)
         today = date.today()
         if a1.button("30giorni"):
             sd, ed = today - timedelta(days=30), today
@@ -216,7 +233,7 @@ def main():
             sd = today.replace(month=1, day=1)
             ed = today
 
-    # ─── Excel: titoli e filtri ─────────────────────────────────────
+    # ─── Excel: titoli e filtri ────────────────────────────────────
     st.markdown(f"**Periodo Selezionato: {sd} – {ed}**\n")
 
     df = pd.read_sql("SELECT * FROM sales", engine, parse_dates=["order_date"])
@@ -233,20 +250,20 @@ def main():
         st.warning("Nessun record")
         return
 
-    # ─── KPI Excel ──────────────────────────────────────────────────
+    # ─── KPI Excel ─────────────────────────────────────────
     n_ordini   = len(filt)
     sales_sum  = filt["sale"].sum()
     cost_sum   = filt["purchase_cost"].sum()
     comm_sum   = filt["commission"].sum()
     margin_l   = sales_sum - (cost_sum + comm_sum)
-    c0,c1,c2,c3,c4 = st.columns(5)
+    c0, c1, c2, c3, c4 = st.columns(5)
     c0.metric("Ordini Excel",   n_ordini)
-    c1.metric("Fatturato",     format_euro(sales_sum))
-    c2.metric("Acquisto",      format_euro(cost_sum))
-    c3.metric("Commissione",   format_euro(comm_sum))
-    c4.metric("Margine Lordo", format_euro(margin_l))
+    c1.metric("Fatturato",      format_euro(sales_sum))
+    c2.metric("Acquisto",       format_euro(cost_sum))
+    c3.metric("Commissione",    format_euro(comm_sum))
+    c4.metric("Margine Lordo",  format_euro(margin_l))
 
-    # ─── Trend giornaliero ─────────────────────────────────────────
+    # ─── Trend giornaliero ─────────────────────────────────────
     st.subheader("Trend giornaliero")
     trend = (
         filt.groupby([filt["order_date"].dt.date, "marketplace"])
@@ -262,32 +279,22 @@ def main():
         acquisto=("purchase_cost","sum"),
         commissione=("commission","sum")
     )
-    summary["margine_lordo"] = (
-        summary["vendite"] - (summary["acquisto"] + summary["commissione"])
-    )
+    summary["margine_lordo"] = (summary["vendite"] - (summary["acquisto"] + summary["commissione"]))
     summary = summary.reset_index()
     for col in ["vendite","acquisto","commissione","margine_lordo"]:
         summary[col] = summary[col].apply(format_euro)
     st.dataframe(summary, use_container_width=True)
 
-    # ─── Prodotti più venduti ─────────────────────────────────────
+    # ─── Prodotti più venduti ────────────────────────────────────
     st.subheader("Prodotti più venduti")
-    sel_mp = st.radio(
-        "Marketplace",
-        ["Tutti"] + markets,
-        horizontal=True
-    )
+    sel_mp = st.radio("Marketplace", ["Tutti"] + markets, horizontal=True)
     df_top = filt if sel_mp == "Tutti" else filt[filt["marketplace"] == sel_mp]
     top_n = st.slider("Top N", 5, 50, 10)
     grp = ["sku"] + (["product_name"] if "product_name" in df_top else [])
     top = (
         df_top.groupby(grp)
-              .agg(
-                  qta=("quantity","sum"),
-                  vendite=("sale","sum"),
-                  acquisto=("purchase_cost","sum"),
-                  commissione=("commission","sum")
-              )
+              .agg(qta=("quantity","sum"), vendite=("sale","sum"),
+                   acquisto=("purchase_cost","sum"), commissione=("commission","sum"))
               .reset_index()
               .sort_values("qta", ascending=False)
               .head(top_n)
@@ -295,7 +302,6 @@ def main():
     top["margine_lordo"] = top["vendite"] - (top["acquisto"] + top["commissione"])
     for col in ["vendite","acquisto","commissione","margine_lordo"]:
         top[col] = top[col].apply(format_euro)
-    top.index += 1
     st.dataframe(top, use_container_width=True)
 
     st.download_button(
@@ -311,7 +317,8 @@ def main():
 
     api_quick = st.radio(
         "Filtra ordini per",
-        ["Oggi","Ieri","Ultimi 30 giorni","Questa Settimana","Mese Corrente","Questo Anno","Personalizzato"],
+        ["Oggi","Ieri","Ultimi 30 giorni","Questa Settimana",
+         "Mese Corrente","Questo Anno","Personalizzato"],
         horizontal=True
     )
     today = date.today()
@@ -322,16 +329,13 @@ def main():
     elif api_quick == "Ultimi 30 giorni":
         api_sd, api_ed = today - timedelta(days=30), today
     elif api_quick == "Questa Settimana":
-        api_sd = today - timedelta(days=today.weekday())
-        api_ed = api_sd + timedelta(days=6)
+        api_sd = today - timedelta(days=today.weekday()); api_ed = api_sd + timedelta(days=6)
     elif api_quick == "Mese Corrente":
         api_sd = today.replace(day=1)
-        nm = api_sd.replace(day=28) + timedelta(days=4)
-        api_ed = nm - timedelta(days=nm.day)
+        nm = api_sd.replace(day=28) + timedelta(days=4); api_ed = nm - timedelta(days=nm.day)
     elif api_quick == "Questo Anno":
-        api_sd = date(today.year,1,1)
-        api_ed = today
-    else:  # "Personalizzato"
+        api_sd = date(today.year,1,1); api_ed = today
+    else:
         api_sd, api_ed = st.date_input(
             "Seleziona intervallo personalizzato",
             value=(today - timedelta(days=7), today),
@@ -351,7 +355,7 @@ def main():
     total_comm   = orders_df["commission"].sum()
     total_margin = total_sales - total_taxes - total_comm
 
-    k1,k2,k3,k4,k5 = st.columns(5)
+    k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Ordini",      orders_df["order_id"].nunique())
     k2.metric("Vendite",     format_euro(total_sales))
     k3.metric("Tasse",       format_euro(total_taxes))
@@ -373,9 +377,8 @@ def main():
         df_orders.style
                  .format({"sale_price": format_euro, "commission": format_euro})
                  .applymap(
-                     lambda v: "color: red"
-                     if str(v).lower() in ("annullato","cancellato","rimborsato")
-                     else "",
+                     lambda v: "color: red" if str(v).lower()
+                     in ("annullato","cancellato","rimborsato") else "",
                      subset=["Stato Ordine"]
                  )
     )
