@@ -314,7 +314,6 @@ def main():
     # ───────────────── KPI API ───────────────────────────────────────
     st.markdown("---")
     st.subheader("Vendite Estratte da Worten")
-
     api_quick = st.radio(
         "Filtra ordini per",
         ["Oggi","Ieri","Ultimi 30 giorni","Questa Settimana",
@@ -329,12 +328,15 @@ def main():
     elif api_quick == "Ultimi 30 giorni":
         api_sd, api_ed = today - timedelta(days=30), today
     elif api_quick == "Questa Settimana":
-        api_sd = today - timedelta(days=today.weekday()); api_ed = api_sd + timedelta(days=6)
+        api_sd = today - timedelta(days=today.weekday())
+        api_ed = api_sd + timedelta(days=6)
     elif api_quick == "Mese Corrente":
         api_sd = today.replace(day=1)
-        nm = api_sd.replace(day=28) + timedelta(days=4); api_ed = nm - timedelta(days=nm.day)
+        nm = api_sd.replace(day=28) + timedelta(days=4)
+        api_ed = nm - timedelta(days=nm.day)
     elif api_quick == "Questo Anno":
-        api_sd = date(today.year,1,1); api_ed = today
+        api_sd = date(today.year,1,1)
+        api_ed = today
     else:
         api_sd, api_ed = st.date_input(
             "Seleziona intervallo personalizzato",
@@ -347,6 +349,10 @@ def main():
     st.markdown(f"**Intervallo API:** {api_sd} – {api_ed}")
 
     orders_df = get_orders_worten(api_sd, api_ed)
+
+    # ─── Garantiamo sempre la colonna `order_status` ───────────────
+    if "order_status" not in orders_df.columns:
+        orders_df["order_status"] = ""
 
     for col in ["sale_price","taxes","commission","shipping"]:
         orders_df[col] = pd.to_numeric(orders_df.get(col,0), errors="coerce").fillna(0)
