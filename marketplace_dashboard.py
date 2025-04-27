@@ -172,42 +172,27 @@ def main():
                 st.success(f"Righe nuove: {import_to_db(drive_to_dfs())}")
 
         st.markdown("---")
-     # ───────────────── Sidebar: range date ─────────────────────────────────────
-bounds = pd.read_sql(
-    "SELECT MIN(order_date) AS dmin, MAX(order_date) AS dmax FROM sales",
-    engine, parse_dates=["dmin","dmax"]
-).iloc[0]
+        bounds = pd.read_sql(
+            "SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales",
+            engine, parse_dates=["dmin","dmax"]
+        ).iloc[0]
+        dmin, dmax = bounds["dmin"].date(), bounds["dmax"].date()
+        markets = sorted(
+            pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
+        )
+        sel = st.multiselect("Marketplace", markets, default=markets)
 
-raw_min, raw_max = bounds["dmin"], bounds["dmax"]
-
-# Se il DB è vuoto (NaT), usiamo oggi come default
-if pd.isna(raw_min):
-    dmin = date.today()
-else:
-    dmin = raw_min.date()
-
-if pd.isna(raw_max):
-    dmax = date.today()
-else:
-    dmax = raw_max.date()
-
-markets = sorted(
-    pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"]
-)
-sel = st.multiselect("Marketplace", markets, default=markets)
-
-dates = st.date_input(
-    "Intervallo",
-    (dmin, dmax),
-    min_value=dmin,
-    max_value=date.today(),
-    key="date_range"
-)
-if isinstance(dates, tuple) and len(dates) == 2:
-    sd, ed = dates
-else:
-    sd = ed = dates
-
+        dates = st.date_input(
+            "Intervallo",
+            (dmin, dmax),
+            min_value=dmin,
+            max_value=date.today(),
+            key="date_range"
+        )
+        if isinstance(dates, tuple) and len(dates) == 2:
+            sd, ed = dates
+        else:
+            sd = ed = dates
 
         st.markdown("---")
         st.subheader("Dati da analizzare rapidi")
@@ -231,7 +216,7 @@ else:
             sd = today.replace(month=1, day=1)
             ed = today
 
-    # ─── Excel: titoli e filtri ─────────────────────────────────────
+    # ─── Excel: titoli e filtri ────────────────────────────────────
     st.markdown(f"**Periodo Selezionato: {sd} – {ed}**\n")
 
     df = pd.read_sql("SELECT * FROM sales", engine, parse_dates=["order_date"])
@@ -248,7 +233,7 @@ else:
         st.warning("Nessun record")
         return
 
-    # ─── KPI Excel ──────────────────────────────────────────────────
+    # ─── KPI Excel ─────────────────────────────────────────
     n_ordini   = len(filt)
     sales_sum  = filt["sale"].sum()
     cost_sum   = filt["purchase_cost"].sum()
@@ -256,12 +241,12 @@ else:
     margin_l   = sales_sum - (cost_sum + comm_sum)
     c0,c1,c2,c3,c4 = st.columns(5)
     c0.metric("Ordini Excel",   n_ordini)
-    c1.metric("Fatturato",     format_euro(sales_sum))
-    c2.metric("Acquisto",      format_euro(cost_sum))
-    c3.metric("Commissione",   format_euro(comm_sum))
-    c4.metric("Margine Lordo", format_euro(margin_l))
+    c1.metric("Fatturato",      format_euro(sales_sum))
+    c2.metric("Acquisto",       format_euro(cost_sum))
+    c3.metric("Commissione",    format_euro(comm_sum))
+    c4.metric("Margine Lordo",  format_euro(margin_l))
 
-    # ─── Trend giornaliero ─────────────────────────────────────────
+    # ─── Trend giornaliero ─────────────────────────────────────
     st.subheader("Trend giornaliero")
     trend = (
         filt.groupby([filt["order_date"].dt.date, "marketplace"])
@@ -285,7 +270,7 @@ else:
         summary[col] = summary[col].apply(format_euro)
     st.dataframe(summary, use_container_width=True)
 
-    # ─── Prodotti più venduti ─────────────────────────────────────
+    # ─── Prodotti più venduti ────────────────────────────────────
     st.subheader("Prodotti più venduti")
     sel_mp = st.radio(
         "Marketplace",
@@ -310,7 +295,6 @@ else:
     top["margine_lordo"] = top["vendite"] - (top["acquisto"] + top["commissione"])
     for col in ["vendite","acquisto","commissione","margine_lordo"]:
         top[col] = top[col].apply(format_euro)
-    top.index += 1
     st.dataframe(top, use_container_width=True)
 
     st.download_button(
