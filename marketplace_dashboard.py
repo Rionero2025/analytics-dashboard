@@ -13,6 +13,8 @@ from sqlalchemy import create_engine
 from datetime import date, timedelta
 from marketplace_api import get_api, APIS
 from marketplace_api.worten import WortenAPI
+from marketplace_api.leroymerlin import LeroyMerlinAPI 
+
 
 # -----------------------------------------------------------------------------
 # Streamlit page configuration & custom CSS
