@@ -273,11 +273,18 @@ def main():
     elif preset=="Questo Anno":
         api_sd,api_ed = date(today.year,1,1), today
     else:
-        d = st.date_input("Intervallo personalizzato",
-                          (today-timedelta(days=7),today),
-                          min_value=date(today.year-1,1,1),
-                          max_value=today)
-        api_sd,api_ed = (d if isinstance(d,tuple) else (d,d))
+       d = st.date_input(
+    "Intervallo personalizzato",
+    value=(today - timedelta(days=7), today),
+    min_value=date(today.year - 1, 1, 1),
+    max_value=today
+)
+
+# Gestione robusta in caso venga selezionata una singola data
+if isinstance(d, tuple) and len(d) == 2:
+    api_sd, api_ed = d
+else:
+    api_sd = api_ed = d
 
     orders_df = load_orders_api(api_mp, api_sd, api_ed)
 
