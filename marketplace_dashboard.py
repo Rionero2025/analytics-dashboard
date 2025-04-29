@@ -141,7 +141,7 @@ def import_to_db(dfs: List[pd.DataFrame]) -> int:
         big.to_sql("sales", conn, if_exists="append", index=False, method="multi")
     return len(big)
 
-@st.cache_data(show_spinner=False)
+
 def drive_to_dfs() -> List[pd.DataFrame]:
     dfs: List[pd.DataFrame] = []
     with tempfile.TemporaryDirectory() as td:
