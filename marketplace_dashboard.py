@@ -271,22 +271,18 @@ def main():
 
         st.dataframe(topx, use_container_width=True)
 
-    # -----------------------------------------------------------------------------
+       # -----------------------------------------------------------------------------
     # API section
     # -----------------------------------------------------------------------------
     st.markdown("---")
-st.markdown("## Vendite Estratte via API")
-
-# Mostriamo solo i nomi umani
-opts = ["Worten", "Leroy Merlin"]
-api_mp = st.selectbox("Marketplace API", opts)
+    st.markdown("## Vendite Estratte via API")
+    api_mp = st.selectbox("Marketplace API", opts)
 
     preset = st.radio(
         "Filtra ordini API per",
         ["Oggi", "Ieri", "Ultimi 30 giorni", "Questa Settimana", "Mese Corrente", "Questo Anno", "Personalizzato"],
         horizontal=True
     )
-
     today = date.today()
     if preset == "Oggi":
         api_sd, api_ed = today, today
