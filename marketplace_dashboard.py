@@ -226,7 +226,7 @@ def main():
         costi = filt_x["purchase_cost"].sum()
         commissioni = filt_x["commission"].sum()
         margine = fatturato - costi - commissioni
-        perc_margine = (margine / fatturato) * 100 if fatturato else 0
+        perc_margine = (margine / costi) * 100 if fatturato else 0
         v2.metric("Fatturato", format_euro(fatturato))
         v3.metric("Costi", format_euro(costi))
         v4.metric("Commissione", format_euro(commissioni))
@@ -254,7 +254,7 @@ def main():
             .reset_index()
         )
         topx["margine"] = topx["vendite"] - topx["commissione"] - topx["acquisto"]
-        topx["% margine"] = (topx["margine"] / topx["vendite"]) * 100
+        topx["% margine"] = (topx["margine"] / topx["acquisto"]) * 100
         topx = topx.sort_values("quantitá", ascending=False).head(top_n)
         for c in ("vendite", "commissione", "acquisto", "margine"):
             topx[c] = topx[c].apply(format_euro)
