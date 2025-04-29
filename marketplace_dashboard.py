@@ -275,8 +275,11 @@ def main():
     # API section
     # -----------------------------------------------------------------------------
     st.markdown("---")
-    st.markdown("## Vendite Estratte via API")
-    api_mp = st.selectbox("Marketplace API", list(APIS.keys()))
+st.markdown("## Vendite Estratte via API")
+
+# Mostriamo solo i nomi umani
+opts = ["Worten", "Leroy Merlin"]
+api_mp = st.selectbox("Marketplace API", opts)
 
     preset = st.radio(
         "Filtra ordini API per",
@@ -310,7 +313,7 @@ def main():
         else:
             api_sd = api_ed = d
 
-    orders_df = load_orders_api(api_mp, api_sd, api_ed)
+orders_df = load_orders_api(api_mp, api_sd, api_ed)
 
     # Ensure text columns exist before filtering
     for col in ("order_id", "sku", "product_name", "order_status", "order_date"):
