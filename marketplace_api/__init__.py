@@ -1,22 +1,19 @@
-# marketplace_api/__init__.py
-
 from .base import MarketplaceAPI
 from .worten import WortenAPI
 from .leroymerlin import LeroyMerlinAPI
 
-__all__ = ["MarketplaceAPI", "WortenAPI", "LeroyMerlinAPI", "get_api"]
-
+# chiavi “canoniche”
 APIS = {
-    "Worten":       WortenAPI,
-    "Leroy Merlin": LeroyMerlinAPI,
+    "worten": WortenAPI,
+    "leroymerlin": LeroyMerlinAPI,
 }
 
 def get_api(name: str) -> MarketplaceAPI:
     """
-    Restituisce l'istanza del client corrispondente al nome
-    (ad es. "Worten" o "Leroy Merlin").
+    Restituisce l'istanza del client corrispondente al nome del marketplace.
+    Case- and space-insensitive lookup.
     """
-    try:
-        return APIS[name]()
-    except KeyError:
+    key = name.strip().lower().replace(" ", "")
+    if key not in APIS:
         raise ValueError(f"Nessun client API per marketplace '{name}'")
+    return APIS[key]()
