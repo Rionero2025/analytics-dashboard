@@ -13,8 +13,7 @@ from sqlalchemy import create_engine
 from datetime import date, timedelta
 from marketplace_api import get_api, APIS
 from marketplace_api.worten import WortenAPI
-from marketplace_api.leroymerlin import LeroyMerlinAPI 
-
+from marketplace_api.leroymerlin import LeroyMerlinAPI
 
 # -----------------------------------------------------------------------------
 # Streamlit page configuration & custom CSS
@@ -32,9 +31,9 @@ st.markdown("""
 # Utility: format numbers as Euro currency
 # -----------------------------------------------------------------------------
 def format_euro(x) -> str:
-    s = str(x).replace("€","").replace(" ","").strip()
+    s = str(x).replace("€", "").replace(" ", "").strip()
     if "," in s:
-        s = s.replace(".","").replace(",",".")
+        s = s.replace(".", "").replace(",", ".")
     try:
         val = float(s)
     except:
@@ -49,19 +48,19 @@ REMOTE_FOLDER = "https://drive.google.com/drive/folders/1y4c1Qo5eE_WdgFmqjXWrGrN
 engine = create_engine("sqlite:///marketplace.db", future=True, echo=False)
 
 COL_MAP: Dict[str,str] = {
-    "Data":"date",
-    "Vendita":"sale",
-    "Acquisto":"purchase_cost",
-    "C. Market":"commission",
-    "SKU/EAN":"sku",
-    "Prodotto":"product_name",
-    "Qta":"quantity",
+    "Data":          "date",
+    "Vendita":       "sale",
+    "Acquisto":      "purchase_cost",
+    "C. Market":     "commission",
+    "SKU/EAN":       "sku",
+    "Prodotto":      "product_name",
+    "Qta":           "quantity",
 }
-ESSENTIAL = {"date","sale"}
+ESSENTIAL = {"date", "sale"}
 KEEP_COLS = [
-    "order_date","marketplace","sheet",
-    "sku","product_name","quantity",
-    "sale","purchase_cost","commission",
+    "order_date", "marketplace", "sheet",
+    "sku", "product_name", "quantity",
+    "sale", "purchase_cost", "commission",
 ]
 
 # -----------------------------------------------------------------------------
@@ -114,7 +113,8 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = pd.to_datetime(df.get("date"), errors="coerce")
     df.drop(columns=["date"], errors="ignore", inplace=True)
     for c in ("sku","product_name","marketplace","sheet"):
-        if c in df: df[c] = df[c].astype(str)
+        if c in df:
+            df[c] = df[c].astype(str)
     if "quantity" not in df:
         df["quantity"] = 1
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(1).astype(int)
@@ -131,7 +131,11 @@ def import_to_db(dfs: List[pd.DataFrame]) -> int:
     big = clean(pd.concat(dfs, ignore_index=True))
     big.drop_duplicates(subset=["order_date","marketplace","sheet","sku"], inplace=True)
     with engine.begin() as conn:
-        existing = pd.read_sql("SELECT order_date,marketplace,sheet,sku FROM sales", conn, parse_dates=["order_date"])
+        existing = pd.read_sql(
+            "SELECT order_date,marketplace,sheet,sku FROM sales",
+            conn,
+            parse_dates=["order_date"]
+        )
     if not existing.empty:
         merged = big.merge(existing, on=["order_date","marketplace","sheet","sku"], how="left", indicator=True)
         big = merged[merged["_merge"]=="left_only"].drop(columns=["_merge"])
@@ -147,7 +151,8 @@ def drive_to_dfs() -> List[pd.DataFrame]:
     with tempfile.TemporaryDirectory() as td:
         files = gdown.download_folder(REMOTE_FOLDER, quiet=True, output=td, use_cookies=False)
         for p in files:
-            if not str(p).endswith(".xlsx"): continue
+            if not str(p).endswith(".xlsx"):
+                continue
             try:
                 b = fetch_xlsx(p) if str(p).startswith("http") else Path(p).read_bytes()
                 dfs.extend(parse_excel(b, Path(p).stem))
@@ -166,50 +171,63 @@ def load_orders_api(marketplace_name: str, start_date: date, end_date: date) -> 
 def main():
     st.title("📊 Rionero Analisi Vendite")
 
+    # Sidebar: Excel upload & filters
     with st.sidebar:
         source = st.selectbox("Sorgente Excel", ["File manuali","Cartella Drive"])
         if st.button("Aggiorna ora"):
-            if source=="File manuali":
+            if source == "File manuali":
                 uploads = st.file_uploader("Trascina .xlsx", type="xlsx", accept_multiple_files=True)
                 if not uploads:
-                    st.error("Carica almeno un file."); st.stop()
+                    st.error("Carica almeno un file.")
+                    st.stop()
                 dfs = [df for uf in uploads for df in parse_excel(uf.read(), uf.name.split(".")[0])]
                 st.success(f"Righe importate: {import_to_db(dfs)}")
             else:
                 st.success(f"Righe importate: {import_to_db(drive_to_dfs())}")
 
         st.markdown("---")
-        bounds = pd.read_sql("SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales", engine, parse_dates=["dmin","dmax"]).iloc[0]
+        bounds = pd.read_sql(
+            "SELECT MIN(order_date) AS dmin,MAX(order_date) AS dmax FROM sales",
+            engine, parse_dates=["dmin","dmax"]
+        ).iloc[0]
         dmin = bounds["dmin"].date() if pd.notna(bounds["dmin"]) else date.today()
         dmax = bounds["dmax"].date() if pd.notna(bounds["dmax"]) else date.today()
 
         markets = sorted(pd.read_sql("SELECT DISTINCT marketplace FROM sales", engine)["marketplace"])
         sel = st.multiselect("Marketplace Excel", markets, default=markets)
 
-        dates = st.date_input("Intervallo Excel", (dmin,dmax), min_value=dmin, max_value=date.today())
-        sd, ed = (dates if isinstance(dates, tuple) else (dates,dates))
+        dates = st.date_input("Intervallo Excel", (dmin, dmax), min_value=dmin, max_value=date.today())
+        sd, ed = (dates if isinstance(dates, tuple) else (dates, dates))
 
         st.markdown("---")
-        c1,c2,c3 = st.columns(3); c4,c5,c6 = st.columns(3)
+        c1, c2, c3 = st.columns(3)
+        c4, c5, c6 = st.columns(3)
         today = date.today()
-        if c1.button("30 giorni"): sd,ed = today-timedelta(days=30), today
-        if c2.button("Oggi"): sd,ed = today, today
-        if c3.button("Ieri"): sd,ed = today-timedelta(days=1), today-timedelta(days=1)
+        if c1.button("30 giorni"):
+            sd, ed = today - timedelta(days=30), today
+        if c2.button("Oggi"):
+            sd, ed = today, today
+        if c3.button("Ieri"):
+            sd, ed = today - timedelta(days=1), today - timedelta(days=1)
         if c4.button("Questa Settimana"):
-            mon = today - timedelta(days=today.weekday()); sd,ed = mon,today
-        if c5.button("Mese Corrente"): sd,ed = today.replace(day=1), today
-        if c6.button("Questo Anno"): sd,ed = date(today.year,1,1), today
+            mon = today - timedelta(days=today.weekday())
+            sd, ed = mon, today
+        if c5.button("Mese Corrente"):
+            sd, ed = today.replace(day=1), today
+        if c6.button("Questo Anno"):
+            sd, ed = date(today.year, 1, 1), today
 
+    # Excel section
     st.markdown("---")
     st.markdown(f"**Periodo Excel:** {sd} – {ed}")
     df_x = pd.read_sql("SELECT * FROM sales", engine, parse_dates=["order_date"])
-    mask_x = df_x["marketplace"].isin(sel) & df_x["order_date"].dt.date.between(sd,ed)
+    mask_x = df_x["marketplace"].isin(sel) & df_x["order_date"].dt.date.between(sd, ed)
     filt_x = df_x[mask_x]
 
     if filt_x.empty:
         st.warning("Nessun dato Excel")
     else:
-        v1,v2,v3,v4,v5 = st.columns(5)
+        v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("Ordini Excel", len(filt_x))
         fatturato = filt_x["sale"].sum()
         costi = filt_x["purchase_cost"].sum()
@@ -226,9 +244,12 @@ def main():
         sel_mp2 = st.radio("Marketplace", ["Tutti"] + sel, horizontal=True)
         df2 = filt_x if sel_mp2 == "Tutti" else filt_x[filt_x["marketplace"] == sel_mp2]
         top_n = st.slider("Top N", 5, 50, 10)
+
+        # Clean up invalid rows
         df2 = df2[~df2["sku"].isin(["0", "nan", ""])]
         df2 = df2[df2["product_name"].notna() & (df2["product_name"] != "nan")]
         df2 = df2[df2["sale"] > 0]
+
         topx = (
             df2
             .groupby(["sku", "marketplace", "product_name"])
@@ -243,10 +264,13 @@ def main():
         topx["margine"] = topx["vendite"] - topx["commissione"] - topx["acquisto"]
         topx["% margine"] = (topx["margine"] / topx["vendite"]) * 100
         topx = topx.sort_values("quantità", ascending=False).head(top_n)
+
         for c in ("vendite", "commissione", "acquisto", "margine"):
             topx[c] = topx[c].apply(format_euro)
         topx["% margine"] = topx["% margine"].apply(lambda x: f"{x:.2f}%")
+
         st.dataframe(topx, use_container_width=True)
+
     # -----------------------------------------------------------------------------
     # API section
     # -----------------------------------------------------------------------------
@@ -256,93 +280,89 @@ def main():
 
     preset = st.radio(
         "Filtra ordini API per",
-        ["Oggi","Ieri","Ultimi 30 giorni","Questa Settimana","Mese Corrente","Questo Anno","Personalizzato"],
+        ["Oggi", "Ieri", "Ultimi 30 giorni", "Questa Settimana", "Mese Corrente", "Questo Anno", "Personalizzato"],
         horizontal=True
     )
+
     today = date.today()
-    if preset=="Oggi":
-        api_sd,api_ed = today,today
-    elif preset=="Ieri":
-        api_sd,api_ed = today-timedelta(days=1), today-timedelta(days=1)
-    elif preset=="Ultimi 30 giorni":
-        api_sd,api_ed = today-timedelta(days=29), today
-    elif preset=="Questa Settimana":
-        mon = today - timedelta(days=today.weekday()); api_sd,api_ed = mon,today
-    elif preset=="Mese Corrente":
-        api_sd,api_ed = today.replace(day=1), today
-    elif preset=="Questo Anno":
-        api_sd,api_ed = date(today.year,1,1), today
+    if preset == "Oggi":
+        api_sd, api_ed = today, today
+    elif preset == "Ieri":
+        api_sd, api_ed = today - timedelta(days=1), today - timedelta(days=1)
+    elif preset == "Ultimi 30 giorni":
+        api_sd, api_ed = today - timedelta(days=29), today
+    elif preset == "Questa Settimana":
+        mon = today - timedelta(days=today.weekday())
+        api_sd, api_ed = mon, today
+    elif preset == "Mese Corrente":
+        api_sd, api_ed = today.replace(day=1), today
+    elif preset == "Questo Anno":
+        api_sd, api_ed = date(today.year, 1, 1), today
     else:
-# --- Intervallo personalizzato API ---
-d = st.date_input(
-    "Intervallo personalizzato",
-    value=(today - timedelta(days=7), today),
-    min_value=date(today.year - 1, 1, 1),
-    max_value=today
-)
-
-# Gestione sicura della selezione data
-if isinstance(d, tuple) and len(d) == 2:
-    api_sd, api_ed = d
-else:
-    api_sd = api_ed = d
-
+        d = st.date_input(
+            "Intervallo personalizzato",
+            value=(today - timedelta(days=7), today),
+            min_value=date(today.year - 1, 1, 1),
+            max_value=today
+        )
+        if isinstance(d, tuple) and len(d) == 2:
+            api_sd, api_ed = d
+        else:
+            api_sd = api_ed = d
 
     orders_df = load_orders_api(api_mp, api_sd, api_ed)
 
     # Ensure text columns exist before filtering
-    for col in ("order_id","sku","product_name","order_status","order_date"):
+    for col in ("order_id", "sku", "product_name", "order_status", "order_date"):
         if col not in orders_df.columns:
             orders_df[col] = ""
 
     # Ensure numeric columns exist & convert
-    for col in ("sale_price","commission","purchase_cost"):
+    for col in ("sale_price", "commission", "purchase_cost"):
         if col not in orders_df.columns:
             orders_df[col] = 0.0
         orders_df[col] = pd.to_numeric(orders_df[col], errors="coerce").fillna(0.0)
 
-    # Fallback: fill missing product_name, sku, order_status via OR04
+    # Fallback for missing details (Worten only)
     client: WortenAPI = get_api(api_mp)
-    mask = orders_df["product_name"]==""
+    mask = orders_df["product_name"] == ""
     for idx in orders_df[mask].index:
-        oid = orders_df.at[idx,"order_id"]
+        oid = orders_df.at[idx, "order_id"]
         try:
             lines = client._fetch_order_lines(oid)
             if lines:
                 r = lines[0]
-                orders_df.at[idx,"product_name"] = r.get("product_name") or r.get("product_title","")
-                orders_df.at[idx,"sku"] = r.get("offer_sku") or r.get("sku","")
-                orders_df.at[idx,"order_status"] = (
-                    orders_df.at[idx,"order_status"]
-                    or r.get("order_status") or r.get("status","")
+                orders_df.at[idx, "product_name"] = r.get("product_name") or r.get("product_title", "")
+                orders_df.at[idx, "sku"] = r.get("offer_sku") or r.get("sku", "")
+                orders_df.at[idx, "order_status"] = (
+                    orders_df.at[idx, "order_status"]
+                    or r.get("order_status") or r.get("status", "")
                 )
         except:
             pass
 
-    # Filtro per Stato Ordine (Effettivi include ora STAGING)
+    # Filter by order status
     status = st.radio(
         "Stato Ordine",
-        ["TUTTI","Ordini Effettivi","Ordini Cancellati"],
+        ["TUTTI", "Ordini Effettivi", "Ordini Cancellati"],
         horizontal=True
     )
-    if status=="Ordini Effettivi":
+    if status == "Ordini Effettivi":
         orders_df = orders_df[
-            orders_df["order_status"].str.upper()
-                     .isin(["SHIPPED", "SHIPPING", "RECEIVED","CLOSED","STAGING"])
+            orders_df["order_status"].str.upper().isin(["SHIPPED", "SHIPPING", "RECEIVED", "CLOSED", "STAGING"])
         ]
-    elif status=="Ordini Cancellati":
+    elif status == "Ordini Cancellati":
         orders_df = orders_df[
-            orders_df["order_status"].str.upper()
-                     .isin(["CANCELED","CANCELLED"])
+            orders_df["order_status"].str.upper().isin(["CANCELED", "CANCELLED"])
         ]
 
     # KPI API
-    vendite  = orders_df["sale_price"].sum()
-    comm     = orders_df["commission"].sum()
-    acquisto = orders_df["purchase_cost"].sum()
-    margine  = vendite - comm - acquisto
+    vendite = orders_df["sale_price"].sum()
+    comm    = orders_df["commission"].sum()
+    acquisto= orders_df["purchase_cost"].sum()
+    margine = vendite - comm - acquisto
 
-    k1,k2,k3,k4 = st.columns(4)
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Ordini (API)",    orders_df["order_id"].nunique())
     k2.metric("Vendite",         format_euro(vendite))
     k3.metric("Commissione",     format_euro(comm))
@@ -357,20 +377,19 @@ else:
     )
 
     df_table = orders_df[[
-        "order_id","sku","order_date",
-        "sale_price","commission","margine_lordo",
-        "product_name","order_status"
+        "order_id", "sku", "order_date",
+        "sale_price", "commission", "margine_lordo",
+        "product_name", "order_status"
     ]].copy()
     df_table.columns = [
-        "ID Ordine","SKU","Data",
-        "Vendita","Commissione","Margine Lordo",
-        "Nome Prodotto","Stato Ordine"
+        "ID Ordine", "SKU", "Data",
+        "Vendita", "Commissione", "Margine Lordo",
+        "Nome Prodotto", "Stato Ordine"
     ]
-    for c in ("Vendita","Commissione","Margine Lordo"):
+    for c in ("Vendita", "Commissione", "Margine Lordo"):
         df_table[c] = df_table[c].apply(format_euro)
 
     st.dataframe(df_table, use_container_width=True)
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
