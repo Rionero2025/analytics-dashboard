@@ -48,13 +48,13 @@ REMOTE_FOLDER = "https://drive.google.com/drive/folders/1y4c1Qo5eE_WdgFmqjXWrGrN
 engine = create_engine("sqlite:///marketplace.db", future=True, echo=False)
 
 COL_MAP: Dict[str,str] = {
-    "Data":          "date",
-    "Vendita":       "sale",
-    "Acquisto":      "purchase_cost",
-    "C. Market":     "commission",
-    "SKU/EAN":       "sku",
-    "Prodotto":      "product_name",
-    "Qta":           "quantity",
+    "Data": "date",
+    "Vendita": "sale",
+    "Acquisto": "purchase_cost",
+    "C. Market": "commission",
+    "SKU/EAN": "sku",
+    "Prodotto": "product_name",
+    "Qta": "quantity",
 }
 ESSENTIAL = {"date", "sale"}
 KEEP_COLS = [
@@ -133,8 +133,7 @@ def import_to_db(dfs: List[pd.DataFrame]) -> int:
     with engine.begin() as conn:
         existing = pd.read_sql(
             "SELECT order_date,marketplace,sheet,sku FROM sales",
-            conn,
-            parse_dates=["order_date"]
+            conn, parse_dates=["order_date"]
         )
     if not existing.empty:
         merged = big.merge(existing, on=["order_date","marketplace","sheet","sku"], how="left", indicator=True)
@@ -178,8 +177,7 @@ def main():
             if source == "File manuali":
                 uploads = st.file_uploader("Trascina .xlsx", type="xlsx", accept_multiple_files=True)
                 if not uploads:
-                    st.error("Carica almeno un file.")
-                    st.stop()
+                    st.error("Carica almeno un file."); st.stop()
                 dfs = [df for uf in uploads for df in parse_excel(uf.read(), uf.name.split(".")[0])]
                 st.success(f"Righe importate: {import_to_db(dfs)}")
             else:
@@ -210,8 +208,7 @@ def main():
         if c3.button("Ieri"):
             sd, ed = today - timedelta(days=1), today - timedelta(days=1)
         if c4.button("Questa Settimana"):
-            mon = today - timedelta(days=today.weekday())
-            sd, ed = mon, today
+            mon = today - timedelta(days=today.weekday()); sd, ed = mon, today
         if c5.button("Mese Corrente"):
             sd, ed = today.replace(day=1), today
         if c6.button("Questo Anno"):
@@ -233,7 +230,7 @@ def main():
         costi = filt_x["purchase_cost"].sum()
         commissioni = filt_x["commission"].sum()
         margine = fatturato - costi - commissioni
-        perc_margine = (margine / fatturato) * 100 if fatturato != 0 else 0
+        perc_margine = (margine / fatturato) * 100 if fatturato else 0
         v2.metric("Fatturato", format_euro(fatturato))
         v3.metric("Costi", format_euro(costi))
         v4.metric("Commissione", format_euro(commissioni))
@@ -245,7 +242,6 @@ def main():
         df2 = filt_x if sel_mp2 == "Tutti" else filt_x[filt_x["marketplace"] == sel_mp2]
         top_n = st.slider("Top N", 5, 50, 10)
 
-        # Clean up invalid rows
         df2 = df2[~df2["sku"].isin(["0", "nan", ""])]
         df2 = df2[df2["product_name"].notna() & (df2["product_name"] != "nan")]
         df2 = df2[df2["sale"] > 0]
@@ -264,18 +260,17 @@ def main():
         topx["margine"] = topx["vendite"] - topx["commissione"] - topx["acquisto"]
         topx["% margine"] = (topx["margine"] / topx["vendite"]) * 100
         topx = topx.sort_values("quantità", ascending=False).head(top_n)
-
         for c in ("vendite", "commissione", "acquisto", "margine"):
             topx[c] = topx[c].apply(format_euro)
         topx["% margine"] = topx["% margine"].apply(lambda x: f"{x:.2f}%")
-
         st.dataframe(topx, use_container_width=True)
 
-       # -----------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------
     # API section
     # -----------------------------------------------------------------------------
     st.markdown("---")
     st.markdown("## Vendite Estratte via API")
+    opts = ["Worten", "Leroy Merlin"]
     api_mp = st.selectbox("Marketplace API", opts)
 
     preset = st.radio(
@@ -291,8 +286,7 @@ def main():
     elif preset == "Ultimi 30 giorni":
         api_sd, api_ed = today - timedelta(days=29), today
     elif preset == "Questa Settimana":
-        mon = today - timedelta(days=today.weekday())
-        api_sd, api_ed = mon, today
+        mon = today - timedelta(days=today.weekday()); api_sd, api_ed = mon, today
     elif preset == "Mese Corrente":
         api_sd, api_ed = today.replace(day=1), today
     elif preset == "Questo Anno":
@@ -309,21 +303,19 @@ def main():
         else:
             api_sd = api_ed = d
 
-orders_df = load_orders_api(api_mp, api_sd, api_ed)
+    orders_df = load_orders_api(api_mp, api_sd, api_ed)
 
-    # Ensure text columns exist before filtering
+    # Ensure columns
     for col in ("order_id", "sku", "product_name", "order_status", "order_date"):
         if col not in orders_df.columns:
             orders_df[col] = ""
-
-    # Ensure numeric columns exist & convert
     for col in ("sale_price", "commission", "purchase_cost"):
         if col not in orders_df.columns:
             orders_df[col] = 0.0
         orders_df[col] = pd.to_numeric(orders_df[col], errors="coerce").fillna(0.0)
 
-    # Fallback for missing details (Worten only)
-    client: WortenAPI = get_api(api_mp)
+    # Fallback fetch for missing lines (Worten)
+    client = get_api(api_mp)
     mask = orders_df["product_name"] == ""
     for idx in orders_df[mask].index:
         oid = orders_df.at[idx, "order_id"]
@@ -333,26 +325,19 @@ orders_df = load_orders_api(api_mp, api_sd, api_ed)
                 r = lines[0]
                 orders_df.at[idx, "product_name"] = r.get("product_name") or r.get("product_title", "")
                 orders_df.at[idx, "sku"] = r.get("offer_sku") or r.get("sku", "")
-                orders_df.at[idx, "order_status"] = (
-                    orders_df.at[idx, "order_status"]
-                    or r.get("order_status") or r.get("status", "")
-                )
+                orders_df.at[idx, "order_status"] = orders_df.at[idx, "order_status"] or r.get("order_status") or r.get("status", "")
         except:
             pass
 
-    # Filter by order status
-    status = st.radio(
-        "Stato Ordine",
-        ["TUTTI", "Ordini Effettivi", "Ordini Cancellati"],
-        horizontal=True
-    )
+    # Filter by status
+    status = st.radio("Stato Ordine", ["TUTTI", "Ordini Effettivi", "Ordini Cancellati"], horizontal=True)
     if status == "Ordini Effettivi":
         orders_df = orders_df[
-            orders_df["order_status"].str.upper().isin(["SHIPPED", "SHIPPING", "RECEIVED", "CLOSED", "STAGING"])
+            orders_df["order_status"].str.upper().isin(["SHIPPED","SHIPPING","RECEIVED","CLOSED","STAGING"])
         ]
     elif status == "Ordini Cancellati":
         orders_df = orders_df[
-            orders_df["order_status"].str.upper().isin(["CANCELED", "CANCELLED"])
+            orders_df["order_status"].str.upper().isin(["CANCELED","CANCELLED"])
         ]
 
     # KPI API
@@ -362,19 +347,14 @@ orders_df = load_orders_api(api_mp, api_sd, api_ed)
     margine = vendite - comm - acquisto
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Ordini (API)",    orders_df["order_id"].nunique())
-    k2.metric("Vendite",         format_euro(vendite))
-    k3.metric("Commissione",     format_euro(comm))
-    k4.metric("Margine Lordo",   format_euro(margine))
+    k1.metric("Ordini (API)", orders_df["order_id"].nunique())
+    k2.metric("Vendite", format_euro(vendite))
+    k3.metric("Commissione", format_euro(comm))
+    k4.metric("Margine Lordo", format_euro(margine))
 
     # Dettaglio Ordini API
     st.subheader("Dettaglio Ordini API")
-    orders_df["margine_lordo"] = (
-        orders_df["sale_price"]
-      - orders_df["commission"]
-      - orders_df["purchase_cost"]
-    )
-
+    orders_df["margine_lordo"] = orders_df["sale_price"] - orders_df["commission"] - orders_df["purchase_cost"]
     df_table = orders_df[[
         "order_id", "sku", "order_date",
         "sale_price", "commission", "margine_lordo",
@@ -385,10 +365,11 @@ orders_df = load_orders_api(api_mp, api_sd, api_ed)
         "Vendita", "Commissione", "Margine Lordo",
         "Nome Prodotto", "Stato Ordine"
     ]
-    for c in ("Vendita", "Commissione", "Margine Lordo"):
+    for c in ("Vendita","Commissione","Margine Lordo"):
         df_table[c] = df_table[c].apply(format_euro)
 
     st.dataframe(df_table, use_container_width=True)
+
 
 if __name__ == "__main__":
     main()
