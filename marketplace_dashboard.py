@@ -11,7 +11,9 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine
 from datetime import date, timedelta
-from marketplace_api import get_api
+from marketplace_api import get_api, APIS
+from marketplace_api.worten import WortenAPI
+from marketplace_api.leroymerlin import LeroyMerlinAPI
 
 # -----------------------------------------------------------------------------
 # Streamlit page configuration & custom CSS
@@ -42,6 +44,7 @@ def format_euro(x) -> str:
 # -----------------------------------------------------------------------------
 # Database & Excel column mapping
 # -----------------------------------------------------------------------------
+REMOTE_FOLDER = "https://drive.google.com/drive/folders/1y4c1Qo5eE_WdgFmqjXWrGrN0QMkLR0wp?usp=drive_link"
 engine = create_engine("sqlite:///marketplace.db", future=True, echo=False)
 
 COL_MAP: Dict[str,str] = {
@@ -60,7 +63,9 @@ KEEP_COLS = [
     "sale", "purchase_cost", "commission",
 ]
 
+# -----------------------------------------------------------------------------
 # Create 'sales' table if it does not exist
+# -----------------------------------------------------------------------------
 with engine.begin() as conn:
     conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS sales (
@@ -92,7 +97,6 @@ def fetch_xlsx(url: str) -> bytes:
     r.raise_for_status()
     return r.content
 
-
 def parse_excel(content: bytes, stem: str) -> List[pd.DataFrame]:
     dfs: List[pd.DataFrame] = []
     sheets = pd.read_excel(content, sheet_name=None, engine="openpyxl")
@@ -104,21 +108,22 @@ def parse_excel(content: bytes, stem: str) -> List[pd.DataFrame]:
         dfs.append(df)
     return dfs
 
-
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["order_date"] = pd.to_datetime(df.get("date"), errors="coerce")
     df.drop(columns=["date"], errors="ignore", inplace=True)
     for c in ("sku","product_name","marketplace","sheet"):
-        df[c] = df[c].astype(str)
-    df["quantity"] = pd.to_numeric(df.get("quantity",1), errors="coerce").fillna(1).astype(int)
+        if c in df:
+            df[c] = df[c].astype(str)
+    if "quantity" not in df:
+        df["quantity"] = 1
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(1).astype(int)
     for c in ("sale","purchase_cost","commission"):
         df[c] = pd.to_numeric(df.get(c,0), errors="coerce").fillna(0.0)
     for c in KEEP_COLS:
         if c not in df:
             df[c] = 0 if c in {"quantity","sale","purchase_cost","commission"} else None
     return df[KEEP_COLS]
-
 
 def import_to_db(dfs: List[pd.DataFrame]) -> int:
     if not dfs:
@@ -151,16 +156,14 @@ def drive_to_dfs() -> List[pd.DataFrame]:
                 st.error(f"❌ Errore {Path(p).name}: {e}")
     return dfs
 
-# -----------------------------------------------------------------------------
-# API section with dynamic cache invalidation
-# -----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
-def load_orders_api(marketplace_name: str, start_date: date, end_date: date, key: int = 0) -> pd.DataFrame:
+def load_orders_api(marketplace_name: str, start_date: date, end_date: date) -> pd.DataFrame:
     client = get_api(marketplace_name)
     return client.get_orders(start_date, end_date)
 
 # -----------------------------------------------------------------------------
 # Main Streamlit app
+# -----------------------------------------------------------------------------
 def main():
     st.title("📊 Rionero Analisi Vendite")
 
@@ -193,15 +196,21 @@ def main():
         c1, c2, c3 = st.columns(3)
         c4, c5, c6 = st.columns(3)
         today = date.today()
-        if c1.button("30 giorni"): sd, ed = today - timedelta(days=30), today
-        if c2.button("Oggi"):       sd, ed = today, today
-        if c3.button("Ieri"):       sd, ed = today - timedelta(days=1), today - timedelta(days=1)
+        if c1.button("30 giorni"):
+            sd, ed = today - timedelta(days=30), today
+        if c2.button("Oggi"):
+            sd, ed = today, today
+        if c3.button("Ieri"):
+            sd, ed = today - timedelta(days=1), today - timedelta(days=1)
         if c4.button("Questa Settimana"):
             mon = today - timedelta(days=today.weekday())
             sd, ed = mon, today
-        if c5.button("Mese Corrente"): sd, ed = today.replace(day=1), today
-        if c6.button("Questo Anno"):  sd, ed = date(today.year, 1, 1), today
+        if c5.button("Mese Corrente"):
+            sd, ed = today.replace(day=1), today
+        if c6.button("Questo Anno"):
+            sd, ed = date(today.year, 1, 1), today
 
+    # Excel section
     st.markdown("---")
     st.markdown(f"**Periodo Excel:** {sd} – {ed}")
     df_x = pd.read_sql("SELECT * FROM sales", engine, parse_dates=["order_date"])
@@ -214,13 +223,13 @@ def main():
         v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("Ordini Excel", len(filt_x))
         fatturato = filt_x["sale"].sum()
-        costi     = filt_x["purchase_cost"].sum()
+        costi = filt_x["purchase_cost"].sum()
         commissioni = filt_x["commission"].sum()
-        margine   = fatturato - costi - commissioni
+        margine = fatturato - costi - commissioni
         perc_margine = (margine / fatturato) * 100 if fatturato else 0
-        v2.metric("Fatturato",      format_euro(fatturato))
-        v3.metric("Costi",          format_euro(costi))
-        v4.metric("Commissione",    format_euro(commissioni))
+        v2.metric("Fatturato", format_euro(fatturato))
+        v3.metric("Costi", format_euro(costi))
+        v4.metric("Commissione", format_euro(commissioni))
         v5.metric("Margine Lordo Excel", format_euro(margine))
         st.metric("% Margine Lordo Excel", f"{perc_margine:.2f}%")
 
@@ -229,10 +238,13 @@ def main():
         df2 = filt_x if sel_mp2 == "Tutti" else filt_x[filt_x["marketplace"] == sel_mp2]
         top_n = st.slider("Top N", 5, 50, 10)
 
-        df2 = df2[~df2["sku"].isin(["0", "nan", ""]) & df2["product_name"].notna() & (df2["sale"] > 0)]
+        df2 = df2[~df2["sku"].isin(["0", "nan", ""])]
+        df2 = df2[df2["product_name"].notna() & (df2["product_name"] != "nan")]
+        df2 = df2[df2["sale"] > 0]
+
         topx = (
             df2
-            .groupby(["sku", "marketplace", "product_name"])  
+            .groupby(["sku", "marketplace", "product_name"])
             .agg(
                 quantitá=("quantity", "sum"),
                 vendite=("sale", "sum"),
@@ -244,11 +256,14 @@ def main():
         topx["margine"] = topx["vendite"] - topx["commissione"] - topx["acquisto"]
         topx["% margine"] = (topx["margine"] / topx["vendite"]) * 100
         topx = topx.sort_values("quantitá", ascending=False).head(top_n)
-        for c in ("vendite", "commissione", "acquisto", "margine"): topx[c] = topx[c].apply(format_euro)
+        for c in ("vendite", "commissione", "acquisto", "margine"):
+            topx[c] = topx[c].apply(format_euro)
         topx["% margine"] = topx["% margine"].apply(lambda x: f"{x:.2f}%")
         st.dataframe(topx, use_container_width=True)
 
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------
+    # API section
+    # -----------------------------------------------------------------------------
     st.markdown("---")
     st.markdown("## Vendite Estratte via API")
     opts = ["Worten", "Leroy Merlin"]
@@ -261,50 +276,96 @@ def main():
         horizontal=True
     )
     today = date.today()
-    if preset == "Oggi": api_sd, api_ed = today, today
-    elif preset == "Ieri": api_sd, api_ed = today - timedelta(days=1), today - timedelta(days=1)
-    elif preset == "Ultimi 30 giorni": api_sd, api_ed = today - timedelta(days=29), today
+    if preset == "Oggi":
+        api_sd, api_ed = today, today
+    elif preset == "Ieri":
+        api_sd, api_ed = today - timedelta(days=1), today - timedelta(days=1)
+    elif preset == "Ultimi 30 giorni":
+        api_sd, api_ed = today - timedelta(days=29), today
     elif preset == "Questa Settimana":
-        mon = today - timedelta(days=today.weekday()); api_sd, api_ed = mon, today
-    elif preset == "Mese Corrente": api_sd, api_ed = today.replace(day=1), today
-    elif preset == "Questo Anno": api_sd, api_ed = date(today.year, 1, 1), today
+        mon = today - timedelta(days=today.weekday())
+        api_sd, api_ed = mon, today
+    elif preset == "Mese Corrente":
+        api_sd, api_ed = today.replace(day=1), today
+    elif preset == "Questo Anno":
+        api_sd, api_ed = date(today.year, 1, 1), today
     else:
-        d = st.date_input("Intervallo personalizzato", value=(today - timedelta(days=7), today), min_value=date(today.year-1,1,1), max_value=today)
-        if isinstance(d, tuple) and len(d)==2: api_sd, api_ed = d
-        else: api_sd = api_ed = d
+        d = st.date_input(
+            "Intervallo personalizzato",
+            value=(today - timedelta(days=7), today),
+            min_value=date(today.year - 1, 1, 1),
+            max_value=today
+        )
+        if isinstance(d, tuple) and len(d) == 2:
+            api_sd, api_ed = d
+        else:
+            api_sd = api_ed = d
 
-    # Bottone per forzare il refresh degli ordini API
-    if "reload_key" not in st.session_state: st.session_state["reload_key"] = 0
-    if st.button("🔄 Forza aggiornamento API"): st.session_state["reload_key"] += 1
+    orders_df = load_orders_api(api_key, api_sd, api_ed)
 
-    orders_df = load_orders_api(api_key, api_sd, api_ed, key=st.session_state["reload_key"])
+    # Ensure columns exist
+    for col in ("order_id", "sku", "product_name", "order_status", "order_date"):
+        if col not in orders_df.columns:
+            orders_df[col] = ""
+    for col in ("sale_price", "commission", "purchase_cost"):
+        if col not in orders_df.columns:
+            orders_df[col] = 0.0
+        orders_df[col] = pd.to_numeric(orders_df[col], errors="coerce").fillna(0.0)
 
-    # Ensure minimal columns
-    for col in ("order_id","sku","product_name","order_status","order_date"): orders_df[col] = orders_df.get(col,"")
-    for col in ("sale_price","commission","purchase_cost"): orders_df[col] = pd.to_numeric(orders_df.get(col,0), errors="coerce").fillna(0.0)
+    # Fallback fetch (Worten)
+    client = get_api(api_key)
+    mask = orders_df["product_name"] == ""
+    for idx in orders_df[mask].index:
+        oid = orders_df.at[idx, "order_id"]
+        try:
+            lines = client._fetch_order_lines(oid)
+            if lines:
+                r = lines[0]
+                orders_df.at[idx, "product_name"] = r.get("product_name") or r.get("product_title", "")
+                orders_df.at[idx, "sku"] = r.get("offer_sku") or r.get("sku", "")
+                orders_df.at[idx, "order_status"] = orders_df.at[idx, "order_status"] or r.get("order_status") or r.get("status", "")
+        except:
+            pass
 
-    status = st.radio("Stato Ordine", ["TUTTI","Ordini Effettivi","Ordini Cancellati"], horizontal=True)
+    # Filter by status
+    status = st.radio("Stato Ordine", ["TUTTI", "Ordini Effettivi", "Ordini Cancellati"], horizontal=True)
     if status == "Ordini Effettivi":
-        orders_df = orders_df[orders_df["order_status"].str.upper().isin(["SHIPPED","SHIPPING","RECEIVED","CLOSED","STAGING"])]
+        orders_df = orders_df[
+            orders_df["order_status"].str.upper().isin(["SHIPPED","SHIPPING","RECEIVED","CLOSED","STAGING"])
+        ]
     elif status == "Ordini Cancellati":
-        orders_df = orders_df[orders_df["order_status"].str.upper().isin(["CANCELED","CANCELLED"])]
+        orders_df = orders_df[
+            orders_df["order_status"].str.upper().isin(["CANCELED","CANCELLED"])
+        ]
 
-    vendite   = orders_df["sale_price"].sum()
-    comm      = orders_df["commission"].sum()
-    acquisto  = orders_df["purchase_cost"].sum()
-    margine   = vendite - comm - acquisto
+    # KPI API
+    vendite = orders_df["sale_price"].sum()
+    comm    = orders_df["commission"].sum()
+    acquisto= orders_df["purchase_cost"].sum()
+    margine = vendite - comm - acquisto
 
-    k1,k2,k3,k4 = st.columns(4)
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Ordini (API)", orders_df["order_id"].nunique())
     k2.metric("Vendite", format_euro(vendite))
     k3.metric("Commissione", format_euro(comm))
     k4.metric("Margine Lordo", format_euro(margine))
 
+    # Dettaglio Ordini API
     st.subheader("Dettaglio Ordini API")
     orders_df["margine_lordo"] = orders_df["sale_price"] - orders_df["commission"] - orders_df["purchase_cost"]
-    df_table = orders_df[["order_id","sku","order_date","sale_price","commission","margine_lordo","product_name","order_status"]].copy()
-    df_table.columns = ["ID Ordine","SKU","Data","Vendita","Commissione","Margine Lordo","Nome Prodotto","Stato Ordine"]
-    for c in ("Vendita","Commissione","Margine Lordo"): df_table[c] = df_table[c].apply(format_euro)
+    df_table = orders_df[[
+        "order_id", "sku", "order_date",
+        "sale_price", "commission", "margine_lordo",
+        "product_name", "order_status"
+    ]].copy()
+    df_table.columns = [
+        "ID Ordine", "SKU", "Data",
+        "Vendita", "Commissione", "Margine Lordo",
+        "Nome Prodotto", "Stato Ordine"
+    ]
+    for c in ("Vendita","Commissione","Margine Lordo"):
+        df_table[c] = df_table[c].apply(format_euro)
+
     st.dataframe(df_table, use_container_width=True)
 
 if __name__ == "__main__":
