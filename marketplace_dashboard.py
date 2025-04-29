@@ -156,7 +156,7 @@ def drive_to_dfs() -> List[pd.DataFrame]:
                 st.error(f"❌ Errore {Path(p).name}: {e}")
     return dfs
 
-@st.cache_data(show_spinner=False)
+//@st.cache_data(show_spinner=False)
 def load_orders_api(marketplace_name: str, start_date: date, end_date: date) -> pd.DataFrame:
     client = get_api(marketplace_name)
     return client.get_orders(start_date, end_date)
