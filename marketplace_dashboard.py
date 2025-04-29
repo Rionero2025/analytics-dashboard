@@ -160,9 +160,10 @@ def drive_to_dfs() -> List[pd.DataFrame]:
     return dfs
 
 @st.cache_data(show_spinner=False)
-def load_orders_api(marketplace_name: str, start_date: date, end_date: date) -> pd.DataFrame:
+def load_orders_api(marketplace_name: str, start_date: date, end_date: date, key: int = 0) -> pd.DataFrame:
     client = get_api(marketplace_name)
     return client.get_orders(start_date, end_date)
+
 
 # -----------------------------------------------------------------------------
 # Main Streamlit app
@@ -302,8 +303,13 @@ def main():
             api_sd, api_ed = d
         else:
             api_sd = api_ed = d
+# Bottone per forzare il refresh degli ordini API
+if "reload_key" not in st.session_state:
+    st.session_state["reload_key"] = 0
 
-    orders_df = load_orders_api(api_mp, api_sd, api_ed)
+if st.button("🔄 Forza aggiornamento API"):
+    st.session_state["reload_key"] += 1
+    orders_df = load_orders_api(api_key, api_sd, api_ed, key=st.session_state["reload_key"])
 
     # Ensure columns
     for col in ("order_id", "sku", "product_name", "order_status", "order_date"):
